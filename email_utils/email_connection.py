@@ -17,11 +17,14 @@ def get_connection_by_file(path: str):
 def refresh_if_needed(func):
     def wrapper(self, *args, **kwargs):
         try:
-            func(self, *args, **kwargs)
+            ret = func(self, *args, **kwargs)
         except self.con.error:
+            logging.debug('Refreshing connection.')
             self.refresh_connection()
 
-            func(self, *args, **kwargs)
+            ret = func(self, *args, **kwargs)
+
+        return ret
 
     return wrapper
 
