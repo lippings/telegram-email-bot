@@ -1,13 +1,19 @@
 import imaplib
 import re
 import logging
-from typing import List, Optional
+import datetime
+from typing import List, Optional, Callable, Union
 
 from file_io import read_yaml
 
 MSG_FIELDS = ['From', 'Message-ID', 'Subject', 'To', 'Date', 'Content-Type']
 MSG_REGEX = {
     f: re.compile(f'{f}\:\s(?P<value>[^\n\r]+)\r?\n') for f in MSG_FIELDS
+}
+
+DOMAIN_MAP = {
+    'hotmail': 'outlook',
+    'gmail': 'gmail'
 }
 
 
@@ -52,9 +58,14 @@ class Message:
             self.data[field] = val
 
         self.id = self.data['Message-ID']
+        self.date = parse_date(self.data['Date'])
 
-    def get(self, field: str, default=None):
+    def get(self, field: str, default=None) -> Optional[str]:
         return self.data.get(field, default)
+
+
+def parse_date(date_str: str) -> datetime.datetime:
+    return datetime.datetime.strptime(date_str, '%a, %d %b %Y %X %z')
 
 
 class EmailConnection:
@@ -64,19 +75,14 @@ class EmailConnection:
 
         domain = email.split('@')[1].split('.')[0]
 
-        domain_map = {
-            'hotmail': 'outlook',
-            'gmail': 'gmail'
-        }
-
-        if domain not in domain_map:
+        if domain not in DOMAIN_MAP:
             raise ValueError(f'Domain {domain} not recognized!'
-                             f'Must be one of: {",".join(domain_map.keys())}')
+                             f'Must be one of: {", ".join(DOMAIN_MAP.keys())}')
 
-        logging.debug(f'Mapping domain "{domain}" to "{domain_map[domain]}"')
-        self.domain = domain_map[domain]
+        logging.debug(f'Mapping domain "{domain}" to "{DOMAIN_MAP[domain]}"')
+        self.domain = DOMAIN_MAP[domain]
 
-        self.con = None
+        self.con: Optional[imaplib.IMAP4_SSL] = None
         self.email = email
         self.password = password
 
@@ -99,6 +105,24 @@ class EmailConnection:
         self.con.close()
         self.con.logout()
         self.con = None
+
+    def _fetch_until(self,
+                     start_ind: int,
+                     cond: Callable[[Message], bool],
+                     max_fetched: int = 50) \
+            -> List[Message]:
+        result = []
+        for i in range(start_ind, start_ind-max_fetched, -1):
+            res, msg_data = self.con.fetch(str(i), '(RFC822)')
+            (_, msg_text), msg_flags = msg_data
+            msg = Message(msg_text.decode(), msg_flags.decode())
+
+            if cond(msg):
+                result.append(msg)
+            else:
+                break
+
+        return result
 
     def _fetch_in_range(self, min_id: int, max_id: int) -> List[Message]:
         result = []
@@ -123,10 +147,16 @@ class EmailConnection:
         return self._fetch_in_range(nb_msgs-nb_to_fetch, nb_msgs)
 
     @_refresh_if_needed
-    def fetch_since(self, last_fetched: int, folder: str = 'Inbox') -> List[Message]:
+    def fetch_since(self, last_fetched: Union[int, datetime.datetime], folder: str = 'Inbox') \
+            -> List[Message]:
         status, msgs = self.con.select(folder, readonly=True)
         nb_msgs = int(msgs[0])
 
-        return self._fetch_in_range(last_fetched, nb_msgs)
+        if isinstance(last_fetched, int):
+            return self._fetch_in_range(last_fetched, nb_msgs)
+        elif isinstance(last_fetched, datetime.datetime):
+            return self._fetch_until(
+                nb_msgs, lambda msg: msg.date <= last_fetched
+            )
 
 # EOF
