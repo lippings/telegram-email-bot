@@ -58,7 +58,11 @@ class Message:
             self.data[field] = val
 
         self.id = self.data['Message-ID']
-        self.date = parse_date(self.data['Date'])
+        try:
+            self.date = parse_date(self.data['Date'])
+        except ValueError as e:
+            logging.error(f'Got ValueError when parsing date {self.data["Date"]}:')
+            raise e
 
     def get(self, field: str, default=None) -> Optional[str]:
         return self.data.get(field, default)
@@ -76,7 +80,7 @@ class EmailConnection:
         domain = email.split('@')[1].split('.')[0]
 
         if domain not in DOMAIN_MAP:
-            raise ValueError(f'Domain {domain} not recognized!'
+            raise ValueError(f'Domain {domain} not recognized! '
                              f'Must be one of: {", ".join(DOMAIN_MAP.keys())}')
 
         logging.debug(f'Mapping domain "{domain}" to "{DOMAIN_MAP[domain]}"')
@@ -99,7 +103,10 @@ class EmailConnection:
     def _connect(self):
         if self.con is None:
             self.con = imaplib.IMAP4_SSL(f'imap.{self.domain}.com')
-        self.con.login(self.email, self.password)
+        try:
+            self.con.login(self.email, self.password)
+        except self.con.error:
+            raise ValueError('Could not login to email account, invalid credentials!')
 
     def _disconnect(self):
         self.con.close()
