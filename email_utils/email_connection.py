@@ -69,6 +69,7 @@ class Message:
 
 
 def parse_date(date_str: str) -> datetime.datetime:
+    date_str = date_str.replace('(UTC)', '').strip()
     return datetime.datetime.strptime(date_str, '%a, %d %b %Y %X %z')
 
 
@@ -109,7 +110,8 @@ class EmailConnection:
             raise ValueError('Could not login to email account, invalid credentials!')
 
     def _disconnect(self):
-        self.con.close()
+        if self.con.state == 'SELECTED':
+            self.con.close()
         self.con.logout()
         self.con = None
 
